@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mechanical analogues of the ATS and the LINC</title>
+<style>
+  :root{
+    --ink:#111; --mid:#555; --faint:#9a9a9a;
+    --green:#2e7d32; --pink:#d81b60; --paper:#fcfcfc;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper);overflow-x:hidden;
+    font-family:"Poppins","Montserrat","Segoe UI",system-ui,sans-serif;color:var(--ink)}
+  /* the canvas height is set in JS: it fits the viewport in the wide layout and
+     grows taller than the viewport (so the page scrolls) in the stacked one */
+  #stage{position:relative;width:100%}
+  canvas{display:block;width:100%}
+  #bar{position:fixed;left:0;right:0;bottom:0;z-index:2;display:flex;gap:24px;
+    align-items:center;justify-content:center;flex-wrap:wrap;padding:9px 18px;
+    background:rgba(252,252,252,.94);border-top:1px solid #e8e8e8;font-size:13px}
+  .grp{display:flex;gap:8px;align-items:center}
+  .grp label{color:var(--mid);white-space:nowrap}
+  .grp output{font-variant-numeric:tabular-nums;min-width:48px;font-weight:600}
+  input[type=range]{width:104px;accent-color:var(--pink)}
+  button{font:inherit;font-weight:600;padding:5px 13px;border:1px solid #d4d4d4;
+    border-radius:999px;background:#fff;color:var(--ink);cursor:pointer;transition:all .12s}
+  button:hover{border-color:var(--faint)}
+  button.on{background:var(--pink);border-color:var(--pink);color:#fff}
+  kbd{font:600 11px/1 ui-monospace,monospace;background:#f0f0f0;border:1px solid #ddd;
+    border-bottom-width:2px;border-radius:4px;padding:3px 5px;color:var(--mid)}
+  #keys{color:var(--faint);font-size:12px}
+  /* phones / narrow windows: compact controls, no keyboard hints */
+  @media (max-width: 760px){
+    #bar{gap:9px 12px;padding:6px 8px;font-size:11px}
+    .grp{gap:5px}
+    .grp output{min-width:38px}
+    input[type=range]{width:74px}
+    button{padding:4px 10px;font-size:11px}
+    #keys{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="bar">
+    <div class="grp">
+      <button id="bPump" class="on">pump</button>
+      <button id="bReset">reset</button>
+    </div>
+    <div class="grp"><label>pump ÷</label>
+      <button id="bFreq">f</button></div>
+    <div class="grp"><label>imbalance</label>
+      <input id="sImb" type="range" min="0" max="0.30" step="0.005" value="0"><output id="oImb"></output></div>
+    <div class="grp"><label>pump depth</label>
+      <input id="sEps" type="range" min="0" max="1" step="0.005" value="0.316"><output id="oEps"></output></div>
+    <div class="grp"><label>pump phase</label>
+      <input id="sPhi" type="range" min="0" max="6.2832" step="0.01" value="3.1416"><output id="oPhi"></output></div>
+    <div class="grp"><label>damping</label>
+      <input id="sZet" type="range" min="0.01" max="0.30" step="0.005" value="0.075"><output id="oZet"></output></div>
+    <div class="grp"><label>signal drive</label>
+      <input id="sDrv" type="range" min="0" max="1" step="0.01" value="0.15"><output id="oDrv"></output></div>
+    <div class="grp"><label>speed</label>
+      <input id="sSpd" type="range" min="0.15" max="4" step="0.05" value="2.0"><output id="oSpd"></output></div>
+    <div id="keys"><kbd>space</kbd> pump <kbd>F</kbd> freq <kbd>R</kbd> reset <kbd>&larr;&rarr;</kbd> imbalance</div>
+  </div>
+</div>
+<script>
+"use strict";
+/* ------------------------------------------------------------------ *
+ *  Mechanical analogues of the ATS and the LINC
+ *
+ *  Extending the pendulum analogy of the deck (JJ -> SQUID -> 3SQUID):
+ *      Josephson energy   E_Ji      <->  mass moment  m_i L_i
+ *      superconducting phase  phi   <->  rotor angle from the vertical
+ *      external flux  phi_i^ext     <->  FIXED angle between the arms
+ *      shunt inductance   E_L       <->  torsion spring at the pivot
+ *
+ *  The ATS and the LINC are the SAME circuit -- two junctions across a
+ *  linear shunt, two loops -- so both are one two-armed rigid rotor on
+ *  a torsion spring:
+ *
+ *      U(phi) = (k/2) phi^2  -  g * SUM_i m_i cos(phi + theta_i)
+ *             = (k/2) phi^2  -  g * ( C cos phi  -  S sin phi )
+ *
+ *  where (C, S) = SUM_i m_i (cos theta_i, sin theta_i) is exactly the
+ *  mass-weighted centre-of-mass vector of the rotor. Taylor expanding:
+ *
+ *      C = component ALONG gravity  -> only EVEN powers of phi
+ *            c2 = (k + gC)/2  frequency        c4 = -gC/24   KERR
+ *      S = component ACROSS gravity -> only ODD powers of phi
+ *            c1 = gS          force            c3 = -gS/6    phi^3
+ *
+ *  Arms sit at theta = sigma +/- delta, with the scissor half-angle
+ *  delta = pi/2 + eps sin(w_p t) carrying the flux pump. The static
+ *  bias sigma is the ONLY difference between the two elements:
+ *
+ *   ATS   sigma = pi/2   (loop fluxes pi, 0 -- asymmetric threading)
+ *
+ *   On the loop fluxes: U = -E_J cos(phi + f1) - E_J cos(phi - f2), note the
+ *   MINUS on the second loop, so with arms at sigma +/- d, f1 = sigma + d and
+ *   f2 = d - sigma. At the DC point d = pi/2 that is ATS (pi, 0) and LINC
+ *   (pi/2, pi/2). Both give the SAME total round the outer loop, f1 + f2 = pi,
+ *   half a flux quantum -- they differ only in how it is distributed: all of it
+ *   in one loop, or split equally. Same geometry, opposing bias point. The AC
+ *   pump enters as d, i.e. it adds EQUALLY to f1 and f2 in both elements
+ *   (common-mode), which is why it cancels across the shunt inductor.
+ *         beam VERTICAL, m1 up / m2 down; arms scissor ACROSS gravity
+ *         => C == 0 identically, for any pump depth: KERR-FREE.
+ *            Pump moves S only:  pump x sin(phi) -> phi^3 -> a+ b^2,
+ *            the two-photon exchange that stabilises a cat qubit.
+ *
+ *   LINC  sigma = 0      (loop fluxes +pi/2, +pi/2 -- SYMMETRIC)
+ *         beam HORIZONTAL, a see-saw; arms scissor ALONG gravity
+ *         => S == 0 identically: PARITY PROTECTED, exactly linear idle.
+ *            Pump moves C only:  pump x cos(phi) -> phi^2 -> a+ b,
+ *            beamsplitter / two-mode squeezing.
+ *
+ *  Each beam's symmetry forbids the other's term -- until the junctions
+ *  are imbalanced (m2 != m1), which leaks exactly the imbalance into the
+ *  forbidden channel.
+ *
+ *  TWO TUNABLE KNOBS
+ *
+ *  f is the resonance of the ATS rig with the pump off, sqrt(KAPPA/I_ATS).
+ *  The flux pump runs at w_p = f or f/3, shared by both panels (one pump
+ *  line feeding two elements).
+ *
+ *  The two rigs are now IDENTICAL mechanically -- same torsion spring,
+ *  same arm masses -- so both resonate at f, and the only difference left
+ *  between the panels is the flux bias, i.e. which way the balanced beam
+ *  points. The pump runs at 2f, so it sits at 2x resonance for BOTH.
+ *
+ *  Each rig is pumped at the frequency where ITS mechanism works, so the
+ *  pump frequency is per rig:
+ *      ATS   pumped at f. Its coupling is ODD, so the leading pumped term
+ *            c1 = gS is a force at w_p; at w_p = w0 that is a direct
+ *            resonant drive, and the rotor rings up linearly.
+ *      LINC  pumped at 2f. Its coupling is EVEN, so the pump modulates the
+ *            spring constant, and 2*w0 is the degenerate parametric point:
+ *            exponential growth from any seed, but ONLY above threshold.
+ *            With equal masses the relative modulation is 2*m*eps/k = eps
+ *            against a threshold of 4*zeta = 0.30, so the LINC does nothing
+ *            at all until the pump depth exceeds ~0.30. That is why the
+ *            default pump depth is set above it.
+ *  The shared "pump /" control divides both pump frequencies by 1 or 3.
+ * ------------------------------------------------------------------ */
+
+const TAU = Math.PI * 2, PI = Math.PI;
+// Virtual design canvas. Two layouts: WIDE puts the panels side by side and fits
+// the viewport; STACKED (phones / narrow windows) puts them one above the other in
+// a narrower column and lets the page scroll. Chosen per frame from the aspect.
+const PANEL_W_WIDE = 790, PANEL_H_WIDE = 920;
+const PANEL_W_NARR = 560, PANEL_H_NARR = 1094;
+const LAY_WIDE = { narrow:false, w:PANEL_W_WIDE, h:PANEL_H_WIDE, cx:395,
+                   px: 42, py:566, pw:322,  kx:412, ky:596, kw:322,
+                   ax: 42, ay:782, aw:706 };
+const LAY_NARR = { narrow:true,  w:PANEL_W_NARR, h:PANEL_H_NARR, cx:280,
+                   px: 24, py:566, pw:512,  kx: 24, ky:772, kw:512,
+                   ax: 24, ay:958, aw:512 };
+let LAY = LAY_WIDE, VW = 1580, VH = 960;   // recomputed every frame
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+
+const K = { ink:"#111", mid:"#555", faint:"#9a9a9a", rule:"#e4e4e4",
+            green:"#2e7d32", greenL:"#43a047", greenF:"rgba(67,160,71,.28)",
+            pink:"#d81b60", pinkF:"rgba(216,27,96,.17)" };
+
+/* ---------- physics (visual units) ---------- */
+const G      = 1.0;    // gravity
+const M1     = 1.0;    // m1 L1            <->  E_J1   (the ATS arm scale)
+const R_ARM  = 1.0;
+const KAPPA  = 2.0;    // torsion spring, BOTH rigs  <->  shunt inductance E_L
+const MSC_LINC = 1;    // LINC arms are the SAME as the ATS. Both rigs now have
+                       // identical spring AND mass, so both resonate at f and the
+                       // ONLY difference left between the panels is the flux bias
+                       // -- which way the balanced beam points. Cleanest possible
+                       // comparison. (Was 4 for a heavier, f/2 LINC.)
+const I_ATS  = 2*M1;                    // inertia of the balanced ATS rotor
+const W0     = Math.sqrt(KAPPA/I_ATS);  // f : the ATS resonance, pump off  (= 1)
+// Both rigs start from EXACTLY zero angle and zero velocity. That is possible
+// only because the signal drive is on: the drive is a pure FORCE (independent of
+// phi), so unlike the pump it can excite a rig sitting at phi = 0. The pump
+// cannot -- the LINC's pumped torque is -gC sin(phi), which vanishes at phi = 0,
+// so a parity-protected rig cannot be driven out of exact rest, only amplified.
+// Measured: with drive = 0 and the pump on, a LINC released at phi = 0 stays at
+// exactly 0.00e+0 forever, while the ATS (odd, force-like) still rings up.
+// Keep these at 0 unless the drive is turned off, in which case the LINC needs a
+// seed to have anything to amplify.
+const PHI0      = 0;      // ATS  initial angle
+const PHI0_LINC = 0;      // LINC initial angle
+const ZETA0  = 0.075;  // default damping ratio -- same Q for both rigs
+const AMP    = 0.84;   // target ring amplitude in rad (before cubic saturation)
+const SAT    = 0.60;   // how hard the cubic term saturates at that amplitude
+
+/* ---------- interactive state ---------- */
+const EPS_MAX = 4.5;   // max pump depth. The subharmonic setting needs DEEP
+                       // modulation: sin(eps sin w_p t) = 2[J1(eps)sin(t) +
+                       // J3(eps)sin(3t) + ...], and at pump/3 the 3*w_p term
+                       // lands exactly on 2*w0, so the LINC is driven by J3 --
+                       // negligible until eps ~ 3. Response is NOT monotonic in
+                       // depth: J1 crosses zero near eps = 3.83, so the PRIMARY
+                       // setting weakens around there.
+const epsFromSlider = u => EPS_MAX*u*u;   // quadratic: fine control when small
+const sliderFromEps = e => Math.sqrt(Math.max(0, e)/EPS_MAX);
+const St = { pump:true, pumpDiv:1, imb:0, eps:0.45, zeta:ZETA0, pphase:PI, drive:0.15, speed:2.0, t:0 };
+// Pump frequency is PER RIG, each at the frequency where its own mechanism
+// works. Both rigs resonate at f (identical spring and mass), and:
+//   ATS  pumped at 1 x f  -- its coupling is ODD, so the pump acts as a direct
+//        resonant force on the mode. Unchanged from before.
+//   LINC pumped at 2 x f  -- its coupling is EVEN, so the pump modulates the
+//        spring constant; 2*w0 is the degenerate parametric point.
+const PMULT_ATS  = 1;
+const PMULT_LINC = 2;
+const wPumpFor = dev => dev.pmult * W0 / St.pumpDiv;
+
+/* ---------- the two devices ---------- */
+const DEVS = [
+  { name:"ATS",  sigma:PI/2, blurb:"asymmetrically threaded SQUID",
+    sub:"balanced beam ACROSS gravity", kappa:KAPPA, mscale:1, pmult:PMULT_ATS,
+    phi0:PHI0,      phid:0 },
+  { name:"LINC", sigma:0.0,  blurb:"linear quantum coupler",
+    sub:"balanced beam ALONG gravity",  kappa:KAPPA, mscale:MSC_LINC, pmult:PMULT_LINC,
+    phi0:PHI0_LINC, phid:0 },
+];
+for (const d of DEVS){
+  d.phi  = d.phi0; d.phid = 0;                  // at rest, at its own seed angle
+  d.hist = []; d.hstride = 1; d.bucket = {n:0, lo:0, hi:0};   // amp-plot history
+  d.env  = 0;
+  d.I    = 2*M1*d.mscale;                       // balanced-rotor inertia
+  d.w0   = Math.sqrt(d.kappa/d.I);              // ATS: f    LINC: 2f
+}
+/* Damping is tunable, so everything derived from it is recomputed on change.
+   Note tsig scales WITH gam, which keeps the drive-only steady amplitude fixed at
+   AMP*drive whatever the damping. That deliberately decouples the two knobs:
+   `signal drive` sets how much signal is injected, `damping` sets the Q -- i.e. the
+   ring-up time and, more visibly, the parametric threshold eps > 4*zeta below which
+   the LINC cannot amplify at all. */
+function retune(){
+  for (const d of DEVS){
+    d.gam  = 2*St.zeta*d.I*d.w0;                // linear damping, equal Q both rigs
+    d.gam3 = SAT*d.gam/(d.w0*d.w0);             // cubic, saturating at the same ANGLE
+    d.tsig = AMP*d.gam*d.w0;                    // resonant drive for that amplitude
+  }
+}
+retune();
+
+/* scissor half-angle: pi/2 at the DC bias point, pumped by the flux.
+   Per rig, because each is pumped at its own frequency. */
+function scissor(dev, t){
+  return PI/2 + (St.pump ? St.eps * Math.sin(wPumpFor(dev)*t + St.pphase) : 0);
+}
+/* rotor arms: {mass, angle relative to the rotor frame} */
+function arms(dev, t){
+  const d = scissor(dev, t), m1 = M1*dev.mscale, m2 = m1*(1 + St.imb);
+  return [ {m:m1, th:dev.sigma + d, tag:"1"},
+           {m:m2, th:dev.sigma - d, tag:"2"} ];
+}
+/* centre-of-mass vector: C along gravity, S across it */
+function comCS(a){
+  let C = 0, S = 0;
+  for (const x of a){ C += x.m*Math.cos(x.th); S += x.m*Math.sin(x.th); }
+  return [C, S];
+}
+const inertia    = a => a.reduce((s,x) => s + x.m*R_ARM*R_ARM, 0);
+const potential  = (p,C,S,k) => 0.5*k*p*p - G*(C*Math.cos(p) - S*Math.sin(p));
+const dPotential = (p,C,S,k) => k*p + G*(C*Math.sin(p) + S*Math.cos(p));
+
+/* ---------- integrate  I phi'' = -dU/dphi - damping + signal ---------- */
+function step(dev, t, dt){
+  const acc = (p, v, tt) => {
+    const a = arms(dev, tt), [C,S] = comCS(a);
+    // OPTIONAL extra excitation, off by default. It used to be unconditional,
+    // which made the rotor ring up even at pump depth 0 and hid what the pump
+    // was actually doing -- everything visible should be caused by the pump.
+    // Turn it up to probe the mode directly (e.g. to see the LINC amplify or
+    // de-amplify an existing signal depending on pump phase).
+    const sig = St.drive*dev.tsig*Math.sin(dev.w0*tt);
+    return (-dPotential(p,C,S,dev.kappa) - dev.gam*v - dev.gam3*v*v*v + sig) / inertia(a);
+  };
+  const p = dev.phi, v = dev.phid;                       // RK4
+  const a1 = acc(p, v, t);
+  const a2 = acc(p + .5*dt*v,             v + .5*dt*a1, t + .5*dt);
+  const a3 = acc(p + .5*dt*(v + .5*dt*a1), v + .5*dt*a2, t + .5*dt);
+  const a4 = acc(p + dt*(v + .5*dt*a2),    v + dt*a3,    t + dt);
+  dev.phi  += dt*(v + dt*(a1 + a2 + a3)/6);
+  dev.phid += dt*(a1 + 2*a2 + 2*a3 + a4)/6;
+}
+
+/* ================= drawing helpers ================= */
+/* unit vector for an angle measured from the DOWNWARD vertical,
+   positive = counter-clockwise (leaning left), screen coords (y down) */
+const dir = a => [-Math.sin(a), Math.cos(a)];
+
+function font(size, w, it){
+  return `${it ? "italic " : ""}${w} ${size}px "Poppins","Segoe UI",system-ui,sans-serif`;
+}
+function txt(s, x, y, o){
+  o = o || {};
+  const size = o.size || 15, al = o.al || "left";
+  ctx.save();
+  ctx.fillStyle = o.col || K.ink; ctx.textAlign = al; ctx.textBaseline = "alphabetic";
+  ctx.font = font(size, o.w || 400, o.it);
+  ctx.fillText(s, x, y);
+  const wid = ctx.measureText(s).width;
+  ctx.restore();
+  return wid;
+}
+/* italic serif symbol with sub/superscript */
+function sym(base, x, y, o){
+  o = o || {};
+  const size = o.size || 17, al = o.al || "left";
+  const F = k => `italic ${size*k}px "Cambria","Times New Roman",serif`;
+  ctx.save(); ctx.fillStyle = o.col || K.ink;
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.font = F(1);    const wb = ctx.measureText(base).width;
+  ctx.font = F(0.68); const ws = Math.max(ctx.measureText(o.sub||"").width,
+                                          ctx.measureText(o.sup||"").width);
+  const x0 = x - (al === "center" ? (wb+ws)/2 : al === "right" ? wb+ws : 0);
+  ctx.font = F(1);    ctx.fillText(base, x0, y);
+  ctx.font = F(0.68);
+  if (o.sub) ctx.fillText(o.sub, x0 + wb + 1, y + size*0.26);
+  if (o.sup) ctx.fillText(o.sup, x0 + wb + 1, y - size*0.46);
+  ctx.restore();
+}
+function line(x1,y1,x2,y2,col,w,dash){
+  ctx.save(); ctx.strokeStyle = col || K.ink; ctx.lineWidth = w || 2; ctx.lineCap = "round";
+  if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.restore();
+}
+/* pink wedge between two arm directions, as on the slide */
+function wedge(cx,cy,r,thA,thB,fill,stroke){
+  const [ax,ay] = dir(thA), [bx,by] = dir(thB);
+  const a0 = Math.atan2(ay,ax), a1 = Math.atan2(by,bx);
+  ctx.save(); ctx.beginPath(); ctx.moveTo(cx,cy);
+  ctx.arc(cx, cy, r, a0, a1, ((a1 - a0 + TAU) % TAU) > PI);
+  ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+  ctx.restore();
+}
+/* torsion spring: Archimedean spiral whose wind-up tracks phi */
+function torsionSpring(cx,cy,r0,r1,startAng,wind){
+  const turns = 3, n = 190;     // whole turns: the outer end lands exactly
+                                // on startAng + wind, not a fraction off
+  ctx.save(); ctx.strokeStyle = K.faint; ctx.lineWidth = 1.7; ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++){
+    const u = i/n, ang = startAng + u*turns*TAU + wind*u, r = r0 + (r1-r0)*u;
+    const x = cx + r*Math.cos(ang), y = cy + r*Math.sin(ang);
+    i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+/* ---------- circuit schematic: 2 junctions + linear shunt, 2 loops ---------- */
+function junctionX(x,y,s){
+  line(x-s, y-s, x+s, y+s, K.ink, 2.6);
+  line(x-s, y+s, x+s, y-s, K.ink, 2.6);
+}
+function coil(x,y0,y1){
+  ctx.save(); ctx.strokeStyle = K.ink; ctx.lineWidth = 2.2; ctx.beginPath();
+  const n = 4, h = (y1-y0)/n, w = 9;
+  ctx.moveTo(x,y0);
+  for (let i = 0; i < n; i++){
+    const ya = y0 + i*h, yb = ya + h;
+    ctx.bezierCurveTo(x+w, ya + h*0.1, x+w, yb - h*0.1, x, yb);
+  }
+  ctx.stroke(); ctx.restore();
+}
+function fluxSymbol(x,y,r,sub,val){
+  ctx.save(); ctx.strokeStyle = K.pink; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(x,y,r,0,TAU); ctx.stroke();
+  ctx.fillStyle = K.pink; ctx.beginPath(); ctx.arc(x,y,2.6,0,TAU); ctx.fill();
+  ctx.restore();
+  sym("φ", x, y - r - 9, {size:17, col:K.pink, sub:sub, sup:"ext", al:"center"});
+  if (val) txt("= " + val, x, y + r + 20,
+               {size:15, w:700, col:K.pink, al:"center"});   // the DC bias, in the loop
+}
+function schematic(cx, cy, dev){
+  const w = 250, h = 104, x0 = cx - w/2, y0 = cy - h/2;
+  ctx.save(); ctx.strokeStyle = K.ink; ctx.lineWidth = 2.2;
+  ctx.strokeRect(x0, y0, w, h); ctx.restore();
+  line(cx, y0, cx, y0 + h*0.30, K.ink, 2.2);            // centre branch
+  coil(cx, y0 + h*0.30, y0 + h*0.70);                   // the linear shunt
+  line(cx, y0 + h*0.70, cx, y0 + h, K.ink, 2.2);
+  junctionX(x0, cy, 12); junctionX(x0 + w, cy, 12);     // the two junctions
+  sym("E", x0 - 18,     cy + 40,     {size:16, col:K.green, sub:"J1", al:"center"});
+  sym("E", x0 + w + 18, cy + 40,     {size:16, col:K.green, sub:"J2", al:"center"});
+  sym("E", cx + 28,     y0 + h + 17, {size:16, col:K.green, sub:"L",  al:"center"});
+  const fx = dev.name === "ATS" ? ["π", "0"]
+                                : ["π/2", "π/2"];
+  fluxSymbol(x0 + w*0.25, cy + 4, 12, "1", fx[0]);
+  fluxSymbol(x0 + w*0.75, cy + 4, 12, "2", fx[1]);
+  txt(dev.name === "ATS" ? "asymmetric threading" : "symmetric threading",
+      cx, y0 + h + 38, {size:13.5, w:600, col:K.pink, al:"center"});
+  txt("outer loop  φ₁ + φ₂ = π",
+      cx, y0 + h + 58, {size:12, col:K.faint, al:"center"});
+}
+
+/* ---------- the mechanical rig ---------- */
+function rig(cx, cy, dev, a, C, S){
+  const R = 84, phi = dev.phi;
+
+  // gravity reference -- the axis the two biases are defined against
+  const gx0 = cx - 152;
+  line(gx0, cy - 34, gx0, cy + 26, K.faint, 1.6);
+  ctx.save(); ctx.translate(gx0, cy + 32); ctx.fillStyle = K.faint;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-4.6,-8); ctx.lineTo(4.6,-8);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+  sym("g", gx0 - 12, cy - 2, {size:18, col:K.faint, al:"center"});
+
+  line(cx, cy - R - 20, cx, cy + R + 20, K.faint, 1.4, [5,6]);   // vertical reference
+  wedge(cx, cy, R*0.62, phi + a[0].th, phi + a[1].th, K.pinkF, "rgba(216,27,96,.35)");
+
+  const [bx,by] = dir(phi + dev.sigma);                          // bias / scissor axis
+  line(cx - bx*(R+16), cy - by*(R+16), cx + bx*(R+16), cy + by*(R+16),
+       "rgba(216,27,96,.40)", 1.4, [2,5]);
+
+  // OUTER end on the bias axis (the pink dashed line = the arms' average
+  // angle); inner end fixed at the hub, so the spiral winds by exactly phi
+  torsionSpring(cx, cy, 7, 30, dev.sigma + PI/2, phi);           // shunt inductance
+
+  for (const x of a){                                            // arms and masses
+    const [ux,uy] = dir(phi + x.th);
+    line(cx, cy, cx + ux*R, cy + uy*R, K.ink, 4.6);
+    const rad = 7 + 9*Math.sqrt(x.m);
+    ctx.save();
+    ctx.fillStyle = K.greenL;
+    ctx.strokeStyle = K.green; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx + ux*R, cy + uy*R, rad, 0, TAU);
+    ctx.fill(); ctx.stroke(); ctx.restore();
+    sym("m", cx + ux*(R + rad + 17), cy + uy*(R + rad + 17) + 6,
+        {size:19, col:K.green, sub:x.tag, al:"center"});
+  }
+  ctx.save(); ctx.fillStyle = K.ink;                             // pivot
+  ctx.beginPath(); ctx.arc(cx, cy, 6.5, 0, TAU); ctx.fill(); ctx.restore();
+
+  wedge(cx, cy, 40, 0, phi, "rgba(120,120,120,.16)", null);      // the mode angle phi
+  sym("φ", cx + 27, cy + 62, {size:20, col:K.mid, al:"center"});
+
+  /* centre of mass -- the faded green dot of the slide, exaggerated so the
+     pump-induced excursion is visible, and split into its two components:
+     green = C along gravity (even terms), pink = S across it (odd terms) */
+  const mt = a.reduce((s,x) => s + x.m, 0);       // a true centre of mass is
+  const mag = v => Math.tanh(4.4*v/mt) * R * 0.78; // invariant under mass scaling
+  const cA = mag(C), cS = mag(S);
+  const [gx,gy] = dir(phi), [px,py] = dir(phi + PI/2);
+  const kx = cx + gx*cA, ky = cy + gy*cA;          // tip of the along-gravity part
+  const comX = kx + px*cS, comY = ky + py*cS;
+  if (Math.abs(cA) > 0.5) line(cx, cy, kx, ky, "rgba(46,125,50,.60)", 3.4);
+  if (Math.abs(cS) > 0.5) line(kx, ky, comX, comY, "rgba(216,27,96,.65)", 3.4);
+  ctx.save();
+  ctx.fillStyle = K.greenF; ctx.beginPath(); ctx.arc(comX, comY, 12, 0, TAU); ctx.fill();
+  ctx.fillStyle = K.green;  ctx.beginPath(); ctx.arc(comX, comY, 4, 0, TAU);  ctx.fill();
+  ctx.restore();
+}
+
+/* ---------- live potential U(phi) ---------- */
+function potentialPlot(x, y, w, h, dev, C, S){
+  // y window sized from the physics: uSpan is the bare parabola's height at the
+  // edge of the plotted phi range, and the pumped term shifts U by up to g*|C|
+  // (which saturates at 2*m = 2). Zoomed out so both fit with headroom.
+  const pMax = 2.35, uSpan = 0.5*dev.kappa*pMax*pMax;
+  const uHi = 1.45*uSpan, uLo = -0.45*uSpan;
+  const X = p => x + (p + pMax)/(2*pMax)*w;
+  const Y = u => y + h - (u - uLo)/(uHi - uLo)*h;
+
+  ctx.save(); ctx.strokeStyle = K.rule; ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h); ctx.restore();
+  line(X(0), y, X(0), y + h, K.rule, 1, [4,5]);
+
+  const curve = (fn, col, wd, dash) => {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();   // true clipping, no flattening
+    ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.lineJoin = "round";
+    if (dash) ctx.setLineDash(dash);
+    ctx.beginPath();
+    for (let i = 0; i <= 240; i++){
+      const q = -pMax + 2*pMax*i/240;
+      i ? ctx.lineTo(X(q), Y(fn(q))) : ctx.moveTo(X(q), Y(fn(q)));
+    }
+    ctx.stroke(); ctx.restore();
+  };
+  curve(p => 0.5*dev.kappa*p*p - G*C,       K.faint, 1.4, [4,5]);  // harmonic ref
+  curve(p => potential(p, C, S, dev.kappa), K.pink,  2.8, null);   // live potential
+
+  const u = potential(dev.phi, C, S, dev.kappa);           // the mode, rolling in it
+  if (u > uLo && u < uHi && Math.abs(dev.phi) < pMax){
+    ctx.save(); ctx.fillStyle = K.greenL; ctx.strokeStyle = K.green; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(X(dev.phi), Y(u), 6.5, 0, TAU);
+    ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  txt("U(φ)", x + 9, y + 19, {size:13, w:600, col:K.mid});
+  txt("harmonic", x + w - 9, y + 19, {size:11, col:K.faint, al:"right"});
+  line(x + w - 88, y + 15, x + w - 70, y + 15, K.faint, 1.4, [4,4]);
+  txt("φ", x + w - 13, y + h - 9, {size:14, col:K.faint, it:true});
+}
+
+/* ---------- amplitude vs time: makes the ring-up visible ---------- */
+const HIST_MAX = 900;                // buckets kept; halved-and-merged past this
+/* The x axis spans the WHOLE run and rescales continuously, so the history is
+   never dropped. To keep that bounded we store BUCKETS of [t, lo, hi, env]
+   rather than raw samples: lo/hi are the min/max of phi over the bucket, drawn
+   as a band. Bucketing (not decimating) is what stops a long record aliasing --
+   a decimated oscillation would draw nonsense, a min/max band never does. When
+   the buckets fill up, adjacent pairs merge and the stride doubles. */
+function pushHist(dev, dtSim){
+  // peak-hold envelope with a slow leak (~3 periods), so growth reads clearly
+  const tau = 3*TAU/dev.w0;
+  dev.env = Math.max(Math.abs(dev.phi), dev.env*Math.exp(-dtSim/tau));
+  const b = dev.bucket;
+  if (b.n === 0){ b.lo = dev.phi; b.hi = dev.phi; }
+  else { b.lo = Math.min(b.lo, dev.phi); b.hi = Math.max(b.hi, dev.phi); }
+  b.n++;
+  if (b.n >= dev.hstride){
+    dev.hist.push([St.t, b.lo, b.hi, dev.env]);
+    b.n = 0;
+    if (dev.hist.length > HIST_MAX){          // merge pairs, double the stride
+      const h = dev.hist, m = [];
+      for (let i = 0; i < h.length; i += 2){
+        const a = h[i], c = h[i+1] || h[i];
+        m.push([c[0], Math.min(a[1], c[1]), Math.max(a[2], c[2]), Math.max(a[3], c[3])]);
+      }
+      dev.hist = m; dev.hstride *= 2;
+    }
+  }
+}
+function ampPlot(x, y, w, h, dev){
+  const yMax = 2.2, T1 = Math.max(1e-6, St.t);
+  const X = t => x + t/T1*w;
+  const Y = v => y + h/2 - v/yMax*(h/2);
+  ctx.save(); ctx.strokeStyle = K.rule; ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h); ctx.restore();
+  line(x, Y(0), x + w, Y(0), K.rule, 1, [4,5]);
+  for (const sgn of [1, -1]){            // +/-1 rad only: +/-2 sits on the frame
+    line(x, Y(sgn), x + w, Y(sgn), "#f0f0f0", 1);
+    txt(`${sgn > 0 ? "+1" : "-1"}`, x + 4, Y(sgn) - 2, {size:9.5, col:K.faint});
+  }
+  const H = dev.hist;
+  if (H.length > 1){
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    // the oscillation, as a min/max band
+    ctx.beginPath();
+    for (let i = 0; i < H.length; i++) i ? ctx.lineTo(X(H[i][0]), Y(H[i][2]))
+                                         : ctx.moveTo(X(H[i][0]), Y(H[i][2]));
+    for (let i = H.length - 1; i >= 0; i--) ctx.lineTo(X(H[i][0]), Y(H[i][1]));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(216,27,96,.30)"; ctx.fill();
+    ctx.strokeStyle = K.pink; ctx.lineWidth = 1.1; ctx.stroke();
+    // the envelope, both sides
+    for (const sgn of [1, -1]){
+      ctx.strokeStyle = "rgba(46,125,50,.9)"; ctx.lineWidth = 1.8;
+      ctx.setLineDash([5,4]); ctx.beginPath();
+      for (let i = 0; i < H.length; i++) i ? ctx.lineTo(X(H[i][0]), Y(sgn*H[i][3]))
+                                           : ctx.moveTo(X(H[i][0]), Y(sgn*H[i][3]));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+  txt("\u03c6(t)", x + 8, y + 15, {size:12.5, w:600, col:K.mid});
+  txt(`envelope ${dev.env.toFixed(2)} rad`, x + w - 8, y + 15,
+      {size:11.5, w:700, col:K.green, al:"right"});
+  txt(`mode time \u2192  ${St.t.toFixed(0)} s`, x + w - 6, y + h - 5,
+      {size:10.5, col:K.faint, al:"right"});
+}
+
+/* ---------- Taylor coefficients: the physics payoff ---------- */
+function coeffs(x, y, w, dev, C, S){
+  const rows = [
+    { lab:"c₁  φ",        v: G*S,     par:"odd",  note:"force" },
+    { lab:"c₃  φ³",  v:-G*S/6,   par:"odd",  note:"3-wave   a†b²" },
+    { lab:"c₂  φ²",  v: G*C/2,   par:"even", note:"frequency shift" },
+    { lab:"c₄  φ⁴",  v:-G*C/24,  par:"even", note:"KERR" },
+  ];
+  const wanted = dev.name === "ATS" ? "odd" : "even";
+  const barW = 92, bx0 = x + 118;
+
+  txt("U(φ) = ½κφ² − g (C cosφ − S sinφ)",
+      x, y - 30, {size:13.5, w:600, col:K.mid});
+  const wc = txt(`C = ${C >= 0 ? "+" : "−"}${Math.abs(C).toFixed(4)}`, x, y - 8,
+      {size:13.5, w:700, col: Math.abs(C) < 1e-6 ? K.faint : K.green});
+  txt("along g → even", x + wc + 8, y - 8, {size:11, col:K.faint});
+  const ws = txt(`S = ${S >= 0 ? "+" : "−"}${Math.abs(S).toFixed(4)}`, x, y + 10,
+      {size:13.5, w:700, col: Math.abs(S) < 1e-6 ? K.faint : K.pink});
+  txt("across g → odd", x + ws + 8, y + 10, {size:11, col:K.faint});
+
+  rows.forEach((r,i) => {
+    const yy = y + 42 + i*25;
+    const live = Math.abs(r.v) > 1e-6, good = r.par === wanted;
+    const col = !live ? K.faint : good ? K.green : K.pink;
+    txt(r.lab, x, yy + 4, {size:14, w:600, col:col});
+    ctx.save(); ctx.strokeStyle = K.rule; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bx0, yy); ctx.lineTo(bx0 + barW, yy); ctx.stroke();
+    ctx.restore();
+    line(bx0 + barW/2, yy - 6, bx0 + barW/2, yy + 6, K.rule, 1);
+    if (live){
+      const mag = Math.min(Math.abs(r.v)*3.4, 1)*(barW/2);
+      ctx.save(); ctx.fillStyle = col;
+      ctx.fillRect(bx0 + barW/2, yy - 4, Math.sign(r.v)*Math.max(mag, 1.5), 8);
+      ctx.restore();
+    }
+    txt(live ? r.note : "— protected —", bx0 + barW + 14, yy + 4,
+        {size:11.5, w: live && !good ? 700 : 400, col:col});
+  });
+  const ly = y + 160;                              // centre-of-mass legend
+  ctx.save();
+  ctx.fillStyle = K.greenF; ctx.beginPath(); ctx.arc(x + 6, ly - 4, 8, 0, TAU); ctx.fill();
+  ctx.fillStyle = K.green;  ctx.beginPath(); ctx.arc(x + 6, ly - 4, 3, 0, TAU); ctx.fill();
+  ctx.restore();
+  txt("centre of mass of the rotor (excursion exaggerated)", x + 20, ly,
+      {size:11.5, col:K.faint});
+}
+
+/* ---------- resonance / pump relation for this rig ---------- */
+function freqLine(x, y, dev){
+  const num = v => Number.isInteger(v) ? String(v) : v.toFixed(2);
+  const q = dev.w0/W0;                            // this rig's resonance, in units of f
+  const w0lbl = Math.abs(q - 1) < 1e-9 ? " = f"
+              : q > 1 ? ` = ${num(q)} f` : ` = f / ${num(1/q)}`;
+  sym("\u03C9", x, y, {size:15, col:K.mid, sub:"0"});
+  let cur = x + 19;
+  cur += txt(w0lbl, cur, y, {size:13.5, w:700, col:K.mid});
+  const r = wPumpFor(dev)/dev.w0;
+  // At 2x resonance the two biases give DIFFERENT mechanisms, so name them:
+  // the LINC pump is even and modulates the spring -> degenerate parametric
+  // amplification; the ATS pump is odd, its linear part is off-resonant at 2w0
+  // and what IS resonant is the phi^3 term -- the two-photon exchange.
+  const isATS = dev.name === "ATS";
+  const par = Math.abs(r - 2) < 0.02, res = Math.abs(r - 1) < 0.02,
+        thr = Math.abs(r - 1/3) < 0.02, hot = par || res || thr;
+  const tag = par ? (isATS ? "  \u2192 \u03c6\u00b3 resonance" : "  \u2192 parametric")
+            : res ? "  \u2192 resonant"
+            : thr ? "  \u2192 3rd harmonic" : "";
+  const pf = wPumpFor(dev)/W0;                     // this rig's pump, in units of f
+  const one = v => Math.abs(v - 1) < 1e-9 ? "" : num(v);   // "f", not "1f"
+  const pflbl = St.pumpDiv === 1 ? `${one(pf)}f`
+                                 : `${one(dev.pmult)}f / ${St.pumpDiv}`;
+  cur += txt(`      pump ${pflbl} = ${r.toFixed(2)} \u00d7 resonance${tag}`, cur, y,
+             {size:12.5, w: hot ? 700 : 400, col: hot ? K.pink : K.faint});
+  // the LINC is parametric: below eps = 4*zeta it cannot amplify at all, which
+  // otherwise looks like a broken panel. Say so, but only when it applies.
+  if (!isATS && par){
+    const thr = 4*St.zeta;
+    if (St.eps < thr)
+      cur += txt(`   needs \u03b5 > ${thr.toFixed(2)}`, cur, y,
+                 {size:12, w:700, col:K.pink});
+  }
+  if (dev.mscale !== 1){
+    const frac = dev.mscale < 1 ? `1/${num(1/dev.mscale)}` : num(dev.mscale);
+    txt(`      arm masses \u00d7 ${frac}`, cur, y,
+        {size:12.5, w:700, col:K.green});
+  }
+}
+
+/* ================= per-device panel ================= */
+function panel(ox, oy, dev){
+  const a = arms(dev, St.t), [C,S] = comCS(a);
+  const L = LAY, x0 = ox + L.px, cx = ox + L.cx;
+  const wn = txt(dev.name, x0, oy + 52, {size:38, w:700});
+  txt(dev.blurb, x0 + wn + 14, oy + 52, {size:16, col:K.faint});
+  txt(dev.sub,   x0, oy + 76, {size:14.5, w:600, col:K.pink});
+  freqLine(x0, oy + 98, dev);
+  schematic(cx, oy + 165, dev);
+  rig(cx, oy + 415, dev, a, C, S);
+  potentialPlot(ox + L.px, oy + L.py, L.pw, 172, dev, C, S);
+  coeffs(ox + L.kx, oy + L.ky, L.kw, dev, C, S);
+  ampPlot(ox + L.ax, oy + L.ay, L.aw, 120, dev);
+}
+
+/* ================= frame loop ================= */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min((now - last)/1000, 0.05) * St.speed;
+  last = now;
+  // cap each substep in SIM time so accuracy does not depend on playback speed
+  const N = Math.max(6, Math.ceil(dt/0.008));
+  for (let i = 0; i < N; i++)
+    for (const d of DEVS) step(d, St.t + i*dt/N, dt/N);
+  St.t += dt;
+  for (const d of DEVS) pushHist(d, dt);
+
+  const sc = SCALE;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.save();
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.translate((cv.clientWidth - VW*sc)/2, 6);
+  ctx.scale(sc, sc);
+
+  txt("same circuit, opposite bias — a mechanical analogy",
+      VW/2, 20, {size:15, w:600, col:K.faint, al:"center"});
+  if (LAY.narrow){                       // stacked: divider between panels
+    line(20, 38 + LAY.h, VW - 20, 38 + LAY.h, K.rule, 1);
+    panel(0, 38,         DEVS[0]);
+    panel(0, 38 + LAY.h, DEVS[1]);
+  } else {                               // side by side
+    line(VW/2, 38, VW/2, VH - 34, K.rule, 1);
+    panel(0,     0, DEVS[0]);
+    panel(LAY.w, 0, DEVS[1]);
+  }
+
+  // the long note does not fit the stacked column (627 vs ~490 px), so shorten it
+  const note = LAY.narrow
+    ? (St.imb < 1e-9 ? "balanced beam → centre of mass on the pivot"
+                     : "imbalanced junctions → centre of mass leaves the pivot")
+    : (St.imb < 1e-9
+        ? "balanced beam → the centre of mass sits on the pivot; only the torsion spring (the shunt inductance) is left"
+        : "imbalanced junctions → the centre of mass leaves the pivot and leaks the imbalance into the forbidden channel");
+  txt(note, VW/2, VH - 10,
+      {size: LAY.narrow ? 12 : 13, w:600, col: St.imb < 1e-9 ? K.faint : K.pink, al:"center"});
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+
+/* ================= plumbing ================= */
+/* Choose the layout, set VW/VH and the canvas size, and cache the scale.
+   WIDE: everything fits the viewport, nothing scrolls.
+   STACKED: fit to WIDTH and let the canvas run taller than the viewport so the page
+   scrolls -- on a phone the alternative is ~25% scale and unreadable text.
+
+   Called ONLY from resize()/startup, never per frame: it both reads layout
+   properties and writes styles, so calling it every frame thrashes layout and
+   starves the simulation. frame() just uses the cached SCALE. */
+let SCALE = 1;
+function layout(){
+  const W = cv.clientWidth || document.documentElement.clientWidth || 1;
+  const bar = document.getElementById("bar");
+  const barH = (bar && bar.offsetHeight) || 56;
+  const availH = Math.max(200, (window.innerHeight || 800) - barH);
+
+  LAY = (W < 760 || W/availH < 1.05) ? LAY_NARR : LAY_WIDE;
+  VW = LAY.narrow ? LAY.w : 2*LAY.w;
+  VH = LAY.narrow ? 38 + 2*LAY.h + 34 : LAY.h + 40;
+
+  const sc = LAY.narrow ? W/VW : Math.min(W/VW, availH/VH);
+  const cssH = Math.round(VH*sc) + 12;
+  if (Math.abs(cv.clientHeight - cssH) > 1) cv.style.height = cssH + "px";
+  const bw = Math.round(W*devicePixelRatio), bh = Math.round(cssH*devicePixelRatio);
+  if (cv.width !== bw || cv.height !== bh){ cv.width = bw; cv.height = bh; }
+  const st = document.getElementById("stage");
+  if (st) st.style.paddingBottom = barH + "px";   // keep the fixed bar clear
+  SCALE = sc;
+  return sc;
+}
+function resize(){ layout(); }
+addEventListener("orientationchange", resize);
+addEventListener("resize", resize);
+
+const el = id => document.getElementById(id);
+function syncUI(){
+  el("oImb").textContent = (St.imb*100).toFixed(1) + "%";
+  el("oEps").textContent = St.eps.toFixed(2);
+  el("oPhi").textContent = (St.pphase/PI).toFixed(2) + "π";
+  el("oZet").textContent = St.zeta.toFixed(3) + "  Q " + (1/(2*St.zeta)).toFixed(1);
+  el("oDrv").textContent = St.drive.toFixed(2);
+  el("oSpd").textContent = St.speed.toFixed(2) + "×";
+  el("bPump").classList.toggle("on", St.pump);
+  el("bFreq").textContent = St.pumpDiv === 1 ? "1" : "3";
+  el("bFreq").classList.toggle("on", St.pumpDiv === 3);
+  // keep every thumb on the value the simulation is actually using
+  el("sImb").value = St.imb;   el("sEps").value = sliderFromEps(St.eps);
+  el("sPhi").value = St.pphase; el("sDrv").value = St.drive;
+  el("sZet").value = St.zeta;
+  el("sSpd").value = St.speed;
+}
+function reset(){
+  St.t = 0;
+  for (const d of DEVS){
+    d.phi = d.phi0; d.phid = 0;                 // back to the seed, at rest
+    d.hist = []; d.env = 0;                     // clear the amplitude history
+    d.hstride = 1; d.bucket = {n:0, lo:0, hi:0};
+  }
+  syncUI();
+}
+el("sImb").oninput   = e => { St.imb    = +e.target.value; syncUI(); };
+el("sEps").oninput   = e => { St.eps    = epsFromSlider(+e.target.value); syncUI(); };
+el("sPhi").oninput   = e => { St.pphase = +e.target.value; syncUI(); };
+el("sZet").oninput   = e => { St.zeta = +e.target.value; retune(); syncUI(); };
+el("sDrv").oninput   = e => { St.drive  = +e.target.value; syncUI(); };
+el("sSpd").oninput   = e => { St.speed  = +e.target.value; syncUI(); };
+el("bPump").onclick  = () => { St.pump     = !St.pump;     syncUI(); };
+el("bFreq").onclick  = () => { St.pumpDiv = St.pumpDiv === 1 ? 3 : 1; syncUI(); };
+el("bReset").onclick = reset;
+addEventListener("keydown", e => {
+  if (e.code === "Space"){ St.pump = !St.pump; e.preventDefault(); }
+  else if (e.key === "f" || e.key === "F"){ St.pumpDiv = St.pumpDiv === 1 ? 3 : 1; }
+  else if (e.key === "r" || e.key === "R"){ reset(); }
+  else if (e.key === "ArrowRight"){ St.imb = Math.min(0.30, St.imb + 0.01); }
+  else if (e.key === "ArrowLeft"){  St.imb = Math.max(0,    St.imb - 0.01); }
+  else return;
+  syncUI();
+});
+
+/* optional URL presets, e.g.  ...html#imb=0.12&div=3&pump=0  */
+(function presets(){
+  const h = location.hash.replace(/^#/, "");
+  if (!h) return;
+  for (const kv of h.split("&")){
+    const [k, v] = kv.split("=");
+    const f = parseFloat(v);
+    if      (k === "imb"   && isFinite(f)) St.imb    = Math.max(0, Math.min(0.30, f));
+    else if (k === "eps"   && isFinite(f)) St.eps    = Math.max(0, Math.min(EPS_MAX, f));
+    else if (k === "phase" && isFinite(f)) St.pphase = f;
+    else if (k === "speed" && isFinite(f)) St.speed  = Math.max(0.15, Math.min(4, f));
+    else if (k === "pump")  St.pump     = v !== "0";
+    else if (k === "drive" && isFinite(f)) St.drive = Math.max(0, Math.min(1, f));
+    else if (k === "zeta"  && isFinite(f)){ St.zeta = Math.max(0.01, Math.min(0.30, f)); retune(); }
+    else if (k === "div")   St.pumpDiv = (f === 3 ? 3 : 1);
+  }
+})();
+
+resize(); syncUI(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
