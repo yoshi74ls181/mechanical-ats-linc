@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATS mechanical analogue — slide animation</title>
+<style>
+  html,body{margin:0;background:#fff;overflow:hidden;
+    font-family:"Poppins","Montserrat","Segoe UI",system-ui,sans-serif}
+  /* 2:3 portrait column, fitted to the window in preview. The renderer forces
+     an exact 1080x1620 CSS viewport, so one design px == one output px (x dpr). */
+  #c{display:block;width:100vw;height:150vw;max-height:100vh;
+     max-width:66.667vh;margin:auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+/* ------------------------------------------------------------------ *
+ *  ATS mechanical analogue -- PowerPoint slide animation
+ *
+ *  A cut-down, fixed-parameter version of ../index.html: the ATS only,
+ *  and of that only the three things the slide needs --
+ *      the pendulum (two-armed rigid rotor on a torsion spring),
+ *      the live potential U(phi),
+ *      and phi(t).
+ *  No LINC panel, no circuit schematic, no Taylor-coefficient table, no
+ *  control bar, no m1/m2 mass labels, no phi label on the rotor. The one
+ *  label in the rig is phi_in on the pump sector.
+ *
+ *  The physics is identical to index.html -- same visual units, same RK4
+ *  integrator -- with the knobs LOCKED to the values this slide shows:
+ *      pump depth eps = 0.2       damping zeta = 0.05
+ *      signal drive   = 0         junction imbalance = 0
+ *  Balanced and undriven means C == 0 exactly (Kerr-free) and the rotor
+ *  starts at exact rest. It still rings up, because the ATS coupling is
+ *  ODD: the pump enters as c1 = gS, a force at the resonance. That
+ *  ring-up out of nothing is what the slide is for.
+ *
+ *  Two modes:
+ *    preview   open the file -- runs in real time and loops at T_END.
+ *    capture   ?capture=1 -- no animation loop; render.js drives it one
+ *              frame at a time through window.renderFrame(i), so the
+ *              output is deterministic and independent of the wall clock.
+ * ------------------------------------------------------------------ */
+
+const TAU = Math.PI * 2, PI = Math.PI, DEG = 180/Math.PI;
+
+/* ---------- locked controls: the four values this slide is about ---------- */
+const EPS    = 0.2;    // pump depth
+const ZETA   = 0.05;   // damping ratio
+const DRIVE  = 0;      // signal drive -- off
+const IMB    = 0;      // junction imbalance -- balanced
+const PPHASE = PI;     // pump phase (the index.html default)
+const PUMP_SUB = "in";  // label on the pump sector: phi_in
+
+/* ---------- timing ---------- */
+const FPS     = 30;
+const T_END   = 60;              // mode seconds per run: full ring-up + plateau
+const VID_S   = 18;              // seconds of video
+const SPEED   = T_END/VID_S;     // mode seconds per video second
+const DT      = SPEED/FPS;       // mode seconds per frame
+const NFRAMES = Math.round(VID_S*FPS);
+const SUBSTEPS = 32;             // RK4 substeps per frame (h ~ 0.0035)
+const HPUSH    = 6;              // phi(t) history: one bucket per HPUSH substeps
+
+/* ---------- design canvas: 2:3 portrait, the three panels STACKED ----------
+   Sized to sit at full slide height on a 16:9 slide, where it takes up the
+   left or right ~37% of the width and leaves the rest for text.
+   The pendulum gets the top ~45%, since it is the thing being explained and
+   it wants to be square; the two plots share the rest and run the full
+   column width. */
+const VW = 1080, VH = 1620;
+const RIG = { cx:540, cy:400, s:3.5, gx:-110 }; // pendulum: centre, scale, g-arrow offset
+const PU  = { x:70, y:846,  w:940, h:360 };     // U(phi)
+const PA  = { x:70, y:1290, w:940, h:280 };     // phi(t)
+const FS  = 2.4;                                // font / line-width scale in the plots
+const TT  = 18;                                 // plot titles sit this far ABOVE the frame
+
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const K = { ink:"#111", mid:"#555", faint:"#9a9a9a", rule:"#e4e4e4",
+            green:"#2e7d32", greenL:"#43a047", greenF:"rgba(67,160,71,.28)",
+            pink:"#d81b60", pinkF:"rgba(216,27,96,.17)", bg:"#ffffff" };
+
+/* ---------- physics (visual units, as in index.html) ---------- */
+const G = 1.0, M1 = 1.0, R_ARM = 1.0, KAPPA = 2.0;
+const SIGMA = PI/2;                     // the ATS bias: loop fluxes (pi, 0)
+const SAT = 0.60, AMP = 0.84;
+const I0   = 2*M1;                      // balanced-rotor inertia
+const W0   = Math.sqrt(KAPPA/I0);       // resonance with the pump off  (= 1)
+const WP   = W0;                        // ATS pumps at 1 x f: odd -> resonant force
+const GAM  = 2*ZETA*I0*W0;              // linear damping
+const GAM3 = SAT*GAM/(W0*W0);           // cubic term, saturates the ring-up
+const TSIG = AMP*GAM*W0;                // drive scale (unused at DRIVE = 0)
+
+/* scissor half-angle: pi/2 at the DC bias point, pumped by the flux */
+const scissor = t => PI/2 + EPS*Math.sin(WP*t + PPHASE);
+/* rotor arms: {mass, angle in the rotor frame} */
+function arms(t){
+  const d = scissor(t), m1 = M1, m2 = m1*(1 + IMB);
+  return [ {m:m1, th:SIGMA + d}, {m:m2, th:SIGMA - d} ];
+}
+/* centre-of-mass vector: C along gravity (even powers), S across it (odd) */
+function comCS(a){
+  let C = 0, S = 0;
+  for (const x of a){ C += x.m*Math.cos(x.th); S += x.m*Math.sin(x.th); }
+  return [C, S];
+}
+const inertia    = a => a.reduce((s,x) => s + x.m*R_ARM*R_ARM, 0);
+const potential  = (p,C,S) => 0.5*KAPPA*p*p - G*(C*Math.cos(p) - S*Math.sin(p));
+const dPotential = (p,C,S) => KAPPA*p + G*(C*Math.sin(p) + S*Math.cos(p));
+
+/* ---------- state ---------- */
+const St = { t:0, phi:0, phid:0, env:0, hist:[], bucket:{n:0,lo:0,hi:0} };
+function resetSim(){
+  St.t = 0; St.phi = 0; St.phid = 0; St.env = 0;
+  St.hist = []; St.bucket = {n:0, lo:0, hi:0};
+}
+
+/* I phi'' = -dU/dphi - gam phi' - gam3 phi'^3 + signal     (RK4) */
+function step(t, dt){
+  const acc = (p, v, tt) => {
+    const a = arms(tt), [C,S] = comCS(a);
+    const sig = DRIVE*TSIG*Math.sin(W0*tt);
+    return (-dPotential(p,C,S) - GAM*v - GAM3*v*v*v + sig) / inertia(a);
+  };
+  const p = St.phi, v = St.phid;
+  const a1 = acc(p, v, t);
+  const a2 = acc(p + .5*dt*v,              v + .5*dt*a1, t + .5*dt);
+  const a3 = acc(p + .5*dt*(v + .5*dt*a1), v + .5*dt*a2, t + .5*dt);
+  const a4 = acc(p + dt*(v + .5*dt*a2),    v + dt*a3,    t + dt);
+  St.phi  += dt*(v + dt*(a1 + a2 + a3)/6);
+  St.phid += dt*(a1 + 2*a2 + 2*a3 + a4)/6;
+}
+/* phi(t) history as min/max BUCKETS of [t, lo, hi], in RADIANS -- a band
+   never aliases, where a decimated oscillation would draw nonsense. The
+   phi(t) plot converts to degrees at draw time.
+   St.env is the analytic-signal amplitude sqrt(phi^2 + (phi_dot/w0)^2), i.e.
+   the envelope of a near-harmonic mode. It is NOT plotted any more; it is
+   kept purely as the ring-up diagnostic that render.js logs per frame. */
+function pushHist(){
+  const q = St.phid/W0;
+  St.env = Math.sqrt(St.phi*St.phi + q*q);
+  const b = St.bucket;
+  if (b.n === 0){ b.lo = St.phi; b.hi = St.phi; }
+  else { b.lo = Math.min(b.lo, St.phi); b.hi = Math.max(b.hi, St.phi); }
+  if (++b.n >= HPUSH){ St.hist.push([St.t, b.lo, b.hi]); b.n = 0; }
+}
+/* advance exactly one frame of mode time */
+function advance(){
+  const h = DT/SUBSTEPS;
+  for (let i = 0; i < SUBSTEPS; i++){
+    step(St.t, h);
+    St.t += h;
+    pushHist();
+  }
+}
+
+/* ================= drawing helpers (from index.html) ================= */
+/* unit vector for an angle from the DOWNWARD vertical, +ve = counter-clockwise,
+   screen coords (y down) */
+const dir = a => [-Math.sin(a), Math.cos(a)];
+
+const font = (size, w, it) =>
+  `${it ? "italic " : ""}${w} ${size}px "Poppins","Segoe UI",system-ui,sans-serif`;
+function txt(s, x, y, o){
+  o = o || {};
+  ctx.save();
+  ctx.fillStyle = o.col || K.ink; ctx.textAlign = o.al || "left";
+  ctx.textBaseline = "alphabetic"; ctx.font = font(o.size || 15, o.w || 400, o.it);
+  ctx.fillText(s, x, y);
+  const wid = ctx.measureText(s).width;
+  ctx.restore();
+  return wid;
+}
+/* italic serif symbol with sub/superscript.
+   o.halo = n draws the glyphs stroked in the background colour first, n units
+   wide, so the label knocks a gap in whatever line art runs underneath it.
+   Needed for the pump label in the rig, which sits on the bias axis and so
+   lies along a dashed line by construction.
+   o.romanSub renders sub/superscripts UPRIGHT, for \mathrm{} subscripts: a
+   multi-letter descriptive subscript like "in" or "pump" is not a variable. */
+function sym(base, x, y, o){
+  o = o || {};
+  const size = o.size || 17, al = o.al || "left";
+  const F  = k => `italic ${size*k}px "Cambria","Times New Roman",serif`;
+  const Fs = k => `${o.romanSub ? "" : "italic "}${size*k}px ` +
+                  `"Cambria","Times New Roman",serif`;
+  ctx.save(); ctx.fillStyle = o.col || K.ink;
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.font = F(1);    const wb = ctx.measureText(base).width;
+  ctx.font = Fs(0.68); const ws = Math.max(ctx.measureText(o.sub||"").width,
+                                           ctx.measureText(o.sup||"").width);
+  const x0 = x - (al === "center" ? (wb+ws)/2 : al === "right" ? wb+ws : 0);
+  if (o.halo){
+    ctx.strokeStyle = o.haloCol || K.bg; ctx.lineWidth = o.halo;
+    ctx.lineJoin = "round"; ctx.miterLimit = 2;
+    ctx.font = F(1);    ctx.strokeText(base, x0, y);
+    ctx.font = Fs(0.68);
+    if (o.sub) ctx.strokeText(o.sub, x0 + wb + 1, y + size*0.26);
+    if (o.sup) ctx.strokeText(o.sup, x0 + wb + 1, y - size*0.46);
+  }
+  ctx.font = F(1);    ctx.fillText(base, x0, y);
+  ctx.font = Fs(0.68);
+  if (o.sub) ctx.fillText(o.sub, x0 + wb + 1, y + size*0.26);
+  if (o.sup) ctx.fillText(o.sup, x0 + wb + 1, y - size*0.46);
+  ctx.restore();
+}
+function line(x1,y1,x2,y2,col,w,dash){
+  ctx.save(); ctx.strokeStyle = col || K.ink; ctx.lineWidth = w || 2; ctx.lineCap = "round";
+  if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.restore();
+}
+/* Sector between two arm directions. ccw, when given, forces the sweep
+   direction; otherwise the SMALLER of the two complementary sectors is drawn,
+   as in index.html.
+   The pump sector needs the override. It spans 2*delta between the arms, with
+   delta = pi/2 + eps sin(w_p t), so 2*delta crosses pi twice per pump period
+   -- and "draw the smaller one" makes the sector jump to the opposite
+   half-plane every time it does. index.html gets away with that because
+   nothing is attached to the sector; here it is the thing being labelled, and
+   a label on a sector that flips sides ~19 times per run is useless. */
+function wedge(cx,cy,r,thA,thB,fill,stroke,ccw){
+  const [ax,ay] = dir(thA), [bx,by] = dir(thB);
+  const a0 = Math.atan2(ay,ax), a1 = Math.atan2(by,bx);
+  ctx.save(); ctx.beginPath(); ctx.moveTo(cx,cy);
+  ctx.arc(cx, cy, r, a0, a1,
+          ccw === undefined ? ((a1 - a0 + TAU) % TAU) > PI : ccw);
+  ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+  ctx.restore();
+}
+/* torsion spring (the shunt inductance): spiral whose wind-up tracks phi */
+function torsionSpring(cx,cy,r0,r1,startAng,wind){
+  const turns = 3, n = 190;
+  ctx.save(); ctx.strokeStyle = K.faint; ctx.lineWidth = 1.7; ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++){
+    const u = i/n, ang = startAng + u*turns*TAU + wind*u, r = r0 + (r1-r0)*u;
+    const x = cx + r*Math.cos(ang), y = cy + r*Math.sin(ang);
+    i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+/* ================= the pendulum ================= */
+/* Drawn at the natural size of index.html inside a uniform scale, so the arm
+   widths, the spring and the g arrow keep their proportions when enlarged for
+   the slide. No m1/m2 labels and no phi label; the mode-angle wedge stays,
+   since that is the deflection itself rather than a label. */
+function rig(a, C, S){
+  const R = 84, phi = St.phi;
+  ctx.save();
+  ctx.translate(RIG.cx, RIG.cy); ctx.scale(RIG.s, RIG.s);
+  const cx = 0, cy = 0;
+
+  const gx0 = cx + RIG.gx;                             // gravity reference
+  line(gx0, cy - 34, gx0, cy + 26, K.faint, 1.6);
+  ctx.save(); ctx.translate(gx0, cy + 32); ctx.fillStyle = K.faint;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-4.6,-8); ctx.lineTo(4.6,-8);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+  sym("g", gx0 - 12, cy - 2, {size:18, col:K.faint, al:"center"});
+
+  line(cx, cy - R - 20, cx, cy + R + 20, K.faint, 1.4, [5,6]);   // vertical reference
+  /* THE PUMP. The sector between the arms spans 2*delta, and the flux pump IS
+     delta = pi/2 + eps sin(w_p t), so this sector opening and closing is the
+     pump made visible. ccw = true pins it to the between-arms sector (see
+     wedge); its bisector is the bias axis drawn just below, which is where
+     the label goes. */
+  wedge(cx, cy, R*0.62, phi + a[0].th, phi + a[1].th, K.pinkF,
+        "rgba(216,27,96,.35)", true);
+
+  const [bx,by] = dir(phi + SIGMA);                    // bias / scissor axis
+  line(cx - bx*(R+16), cy - by*(R+16), cx + bx*(R+16), cy + by*(R+16),
+       "rgba(216,27,96,.40)", 1.4, [2,5]);
+
+  torsionSpring(cx, cy, 7, 30, SIGMA + PI/2, phi);     // shunt inductance
+
+  for (const x of a){                                  // arms and masses
+    const [ux,uy] = dir(phi + x.th);
+    line(cx, cy, cx + ux*R, cy + uy*R, K.ink, 4.6);
+    ctx.save();
+    ctx.fillStyle = K.greenL; ctx.strokeStyle = K.green; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx + ux*R, cy + uy*R, 7 + 9*Math.sqrt(x.m), 0, TAU);
+    ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  ctx.save(); ctx.fillStyle = K.ink;                   // pivot
+  ctx.beginPath(); ctx.arc(cx, cy, 6.5, 0, TAU); ctx.fill(); ctx.restore();
+
+  wedge(cx, cy, 40, 0, phi, "rgba(120,120,120,.16)", null);      // the mode angle
+
+  /* Centre of mass, TRUE TO SCALE -- not exaggerated as in index.html.
+     The masses sit at R_ARM = 1, drawn R px from the pivot, so the centre of
+     mass is exactly (C, S)/Sum(m) * R px: no fudge factor, and bounded by R
+     on its own since |Sum m_i dir_i| <= Sum m_i. Split into its two
+     components: green = C along gravity (even terms), pink = S across it
+     (odd terms). Balanced ATS => C == 0, so only the pink part ever moves --
+     the pump rocking the centre of mass ACROSS gravity is the drive on the
+     mode. Peak excursion here is sin(eps) = 0.199 arm lengths. */
+  const mt = a.reduce((s,x) => s + x.m, 0);
+  const mag = v => v/mt * R;
+  const cA = mag(C), cS = mag(S);
+  const [gx,gy] = dir(phi), [px,py] = dir(phi + PI/2);
+  const kx = cx + gx*cA, ky = cy + gy*cA;
+  const comX = kx + px*cS, comY = ky + py*cS;
+  if (Math.abs(cA) > 0.5) line(cx, cy, kx, ky, "rgba(46,125,50,.60)", 3.4);
+  if (Math.abs(cS) > 0.5) line(kx, ky, comX, comY, "rgba(216,27,96,.65)", 3.4);
+  ctx.save();
+  ctx.fillStyle = K.greenF; ctx.beginPath(); ctx.arc(comX, comY, 12, 0, TAU); ctx.fill();
+  ctx.fillStyle = K.green;  ctx.beginPath(); ctx.arc(comX, comY, 4, 0, TAU);  ctx.fill();
+  ctx.restore();
+
+  /* The pump sector's label, on the sector's BISECTOR -- which is the bias
+     axis, so it sits at the open end of the pink dashed line, just past the
+     sector arc at 0.62R. The arms are at phi + SIGMA +/- delta with delta
+     ~ pi/2, so that direction stays ~pi/2 from BOTH arms at all times: unlike
+     a label in the mode-angle wedge, an arm can never run over it. Drawn last
+     so the halo cuts a gap in the bias axis, which it does lie on.
+     Radius 64 rather than 70: "pi + phi_in" is much wider than "phi_in" was,
+     and at 70 its outer end came within ~50 px of the g arrow whenever phi
+     passed through zero and the bias axis lay horizontal. */
+  const [ux,uy] = dir(phi + SIGMA);
+  sym("\u03c0 + \u03c6", cx + ux*64, cy + uy*64 + 7,
+      {size:20, col:K.pink, al:"center", halo:5,
+       sub:PUMP_SUB, romanSub:true});
+
+  ctx.restore();
+}
+
+/* ================= live potential U(phi) ================= */
+function potentialPlot(C, S){
+  const x = PU.x, y = PU.y, w = PU.w, h = PU.h;
+  // Window sized for the BALANCED ATS: C == 0, so the well never shifts
+  // bodily, it only ROCKS, by up to g|S| = 2 sin(eps) -- about 15% of the
+  // plot height here. The U range is tighter than the phi range is wide,
+  // because the column makes this plot short and broad: a taller window
+  // would flatten the well into a shallow smile. The parabola leaves
+  // through the top edge just inside the corners, and the ball sweeps
+  // roughly 19% to 79% of the height.
+  const pMax = 1.5, uHi = 2.1, uLo = -0.5;
+  const X = p => x + (p + pMax)/(2*pMax)*w;
+  const Y = u => y + h - (u - uLo)/(uHi - uLo)*h;
+
+  ctx.save(); ctx.strokeStyle = K.rule; ctx.lineWidth = 1*FS;
+  ctx.strokeRect(x, y, w, h); ctx.restore();
+  line(X(0), y, X(0), y + h, K.rule, 1*FS, [4*FS,5*FS]);
+
+  const curve = (fn, col, wd, dash) => {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();   // true clipping
+    ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.lineJoin = "round";
+    if (dash) ctx.setLineDash(dash);
+    ctx.beginPath();
+    for (let i = 0; i <= 320; i++){
+      const q = -pMax + 2*pMax*i/320;
+      i ? ctx.lineTo(X(q), Y(fn(q))) : ctx.moveTo(X(q), Y(fn(q)));
+    }
+    ctx.stroke(); ctx.restore();
+  };
+  // The pump-off potential. At eps = 0 the scissor half-angle is exactly
+  // pi/2, so C = 0 and S = 0 and U = kappa phi^2/2. Written out rather than
+  // carried as index.html's "0.5*KAPPA*p*p - G*C": for the ATS that term is
+  // identically zero, so the two are the same curve, but spelling it this way
+  // says the reference is FIXED. linc-slide.html needs it gone outright --
+  // there C is the pumped quantity, and subtracting the live C would draw a
+  // parabola bobbing with the pump. The gap to the live curve is the pump.
+  curve(p => 0.5*KAPPA*p*p,       K.faint, 1.4*FS, [4*FS,5*FS]);
+  curve(p => potential(p, C, S),  K.pink,  2.8*FS, null);
+
+  const u = potential(St.phi, C, S);                   // the mode, rolling in it
+  if (u > uLo && u < uHi && Math.abs(St.phi) < pMax){
+    ctx.save(); ctx.fillStyle = K.greenL; ctx.strokeStyle = K.green;
+    ctx.lineWidth = 1.8*FS;
+    ctx.beginPath(); ctx.arc(X(St.phi), Y(u), 6.5*FS, 0, TAU);
+    ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  txt("U(φ)", x, y - TT, {size:13*FS, w:600, col:K.mid});
+  /* Legend INSIDE the plot, lower left -- the one corner the parabola leaves
+     empty (by the legend's right end the curve is still ~46% up the frame).
+     The sample now uses the reference curve's OWN dash pattern, [4,5]*FS,
+     where it used to use [4,4] and so slightly misdescribed the line it
+     stands for. Length is exactly 3 dashes + 2 gaps = 22*FS, so three full
+     dashes fit and the third ends flush instead of leaving a stub of a
+     fourth, and the label sits 4*FS away instead of a whole plot-width. */
+  const dashL = 22*FS, lgx = x + 14*FS, lgy = y + h - 15*FS;
+  line(lgx, lgy, lgx + dashL, lgy, K.faint, 1.4*FS, [4*FS,5*FS]);
+  txt("pump off", lgx + dashL + 4*FS, lgy + 3.8*FS, {size:11*FS, col:K.faint});
+  txt("φ", x + w - 13*FS, y + h - 9*FS, {size:14*FS, col:K.faint, it:true});
+}
+
+/* ================= phi(t): makes the ring-up visible ================= */
+function ampPlot(){
+  const x = PA.x, y = PA.y, w = PA.w, h = PA.h;
+  // Axis in DEGREES. The mode is integrated in radians -- as it has to be,
+  // since U(phi) and the whole Taylor story are in radians -- so the
+  // conversion happens here, at draw time only: St.phi and the history that
+  // feeds this plot both stay in radians.
+  const yMax = 80;                        // degrees; the peak is ~63.1 deg
+  const X = t => x + t/T_END*w;           // FIXED axis: the trace sweeps across
+  const Y = d => y + h/2 - d/yMax*(h/2);  // d in DEGREES
+  ctx.save(); ctx.strokeStyle = K.rule; ctx.lineWidth = 1*FS;
+  ctx.strokeRect(x, y, w, h); ctx.restore();
+  line(x, Y(0), x + w, Y(0), K.rule, 1*FS, [4*FS,5*FS]);
+  for (const g of [30, 60]) for (const sgn of [1, -1]){
+    line(x, Y(sgn*g), x + w, Y(sgn*g), "#f0f0f0", 1*FS);
+    txt((sgn > 0 ? "+" : "−") + g, x + 4*FS, Y(sgn*g) - 3*FS,
+        {size:9.5*FS, col:K.faint});
+  }
+  const H = St.hist;
+  if (H.length > 1){
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.beginPath();                                 // oscillation as a min/max band
+    for (let i = 0; i < H.length; i++) i ? ctx.lineTo(X(H[i][0]), Y(H[i][2]*DEG))
+                                         : ctx.moveTo(X(H[i][0]), Y(H[i][2]*DEG));
+    for (let i = H.length - 1; i >= 0; i--) ctx.lineTo(X(H[i][0]), Y(H[i][1]*DEG));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(216,27,96,.30)"; ctx.fill();
+    ctx.strokeStyle = K.pink; ctx.lineWidth = 1.1*FS; ctx.stroke();
+    ctx.restore();
+  }
+  txt("φ(t)", x, y - TT, {size:13*FS, w:600, col:K.mid});
+  txt("degrees", x + w, y - TT, {size:11*FS, col:K.faint, al:"right"});
+  txt("time →", x + w, y + h + 10*FS, {size:10.5*FS, col:K.faint, al:"right"});
+}
+
+/* ================= frame ================= */
+function draw(){
+  const a = arms(St.t), cs = comCS(a);
+  const sc = cv.clientWidth/VW, dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = K.bg; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.save();
+  ctx.scale(dpr*sc, dpr*sc);
+  rig(a, cs[0], cs[1]);
+  potentialPlot(cs[0], cs[1]);
+  ampPlot();
+  ctx.restore();
+}
+function sizeCanvas(){
+  const dpr = window.devicePixelRatio || 1;
+  const bw = Math.round(cv.clientWidth*dpr), bh = Math.round(cv.clientHeight*dpr);
+  if (cv.width !== bw || cv.height !== bh){ cv.width = bw; cv.height = bh; }
+}
+
+/* ---------- capture: driven one frame at a time by render.js ---------- */
+const CAPTURE = new URLSearchParams(location.search).has("capture");
+window.renderFrame = function(i){
+  if (i === 0) resetSim(); else advance();
+  sizeCanvas(); draw();
+  return { i:i, t:St.t, phi:St.phi, env:St.env };
+};
+window.SLIDE_META = { NFRAMES:NFRAMES, FPS:FPS, VID_S:VID_S, T_END:T_END,
+                      SPEED:SPEED, VW:VW, VH:VH,
+                      EPS:EPS, ZETA:ZETA, DRIVE:DRIVE, IMB:IMB };
+
+/* ---------- preview: real time, loops at T_END ---------- */
+/* Steps in whole DT frames, exactly as capture does, and CARRIES the
+   remainder. Advancing one frame per repaint instead would run the preview
+   at the display refresh rate -- 2x too fast on a 60 Hz screen -- and would
+   not match the video. */
+let last = performance.now(), carry = 0;
+function loop(now){
+  carry += Math.min((now - last)/1000, 0.1)*SPEED;
+  last = now;
+  while (carry >= DT){
+    if (St.t >= T_END) resetSim();
+    advance();
+    carry -= DT;
+  }
+  sizeCanvas(); draw();
+  requestAnimationFrame(loop);
+}
+addEventListener("resize", function(){ sizeCanvas(); draw(); });
+sizeCanvas();
+if (CAPTURE){ resetSim(); draw(); } else { requestAnimationFrame(loop); }
+</script>
+</body>
+</html>
