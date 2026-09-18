@@ -75,7 +75,14 @@ const VW = 1080, VH = 1620;
 const RIG = { cx:540, cy:400, s:3.5, gx:-110 }; // pendulum: centre, scale, g-arrow offset
 const PU  = { x:70, y:846,  w:940, h:360 };     // U(phi)
 const PA  = { x:70, y:1290, w:940, h:280 };     // phi(t)
-const FS  = 2.4;                                // font / line-width scale in the plots
+const FS  = 2.4;                                // line-width / dash / spacing scale
+                                                // in the plots
+const LF  = 3.2;                                // TEXT scale in the plots, kept
+                                                // separate from FS so the labels can
+                                                // grow without also thickening the
+                                                // frames, curves and dashes. The
+                                                // pendulum's own labels use plain
+                                                // sizes and are untouched by this.
 const TT  = 18;                                 // plot titles sit this far ABOVE the frame
 
 const cv = document.getElementById("c"), ctx = cv.getContext("2d");
@@ -375,7 +382,7 @@ function potentialPlot(C, S){
     ctx.beginPath(); ctx.arc(X(St.phi), Y(u), 6.5*FS, 0, TAU);
     ctx.fill(); ctx.stroke(); ctx.restore();
   }
-  txt("U(φ)", x, y - TT, {size:13*FS, w:600, col:K.mid});
+  txt("U(φ)", x, y - TT, {size:13*LF, w:600, col:K.mid});
   /* Legend INSIDE the plot, lower left -- the one corner the parabola leaves
      empty (by the legend's right end the curve is still ~46% up the frame).
      The sample now uses the reference curve's OWN dash pattern, [4,5]*FS,
@@ -385,8 +392,8 @@ function potentialPlot(C, S){
      fourth, and the label sits 4*FS away instead of a whole plot-width. */
   const dashL = 22*FS, lgx = x + 14*FS, lgy = y + h - 15*FS;
   line(lgx, lgy, lgx + dashL, lgy, K.faint, 1.4*FS, [4*FS,5*FS]);
-  txt("pump off", lgx + dashL + 4*FS, lgy + 3.8*FS, {size:11*FS, col:K.faint});
-  txt("φ", x + w - 13*FS, y + h - 9*FS, {size:14*FS, col:K.faint, it:true});
+  txt("pump off", lgx + dashL + 4*FS, lgy + 3.8*FS, {size:11*LF, col:K.faint});
+  txt("φ", x + w - 13*FS, y + h - 9*FS, {size:14*LF, col:K.faint, it:true});
 }
 
 /* ================= phi(t): makes the ring-up visible ================= */
@@ -409,7 +416,7 @@ function ampPlot(){
     for (const sgn of [1, -1]){
       line(x, Y(sgn*g.v), x + w, Y(sgn*g.v), "#f0f0f0", 1*FS);
       txt((sgn > 0 ? "" : "−") + g.lab, x + 4*FS, Y(sgn*g.v) - 3*FS,
-          {size:9.5*FS, col:K.faint});
+          {size:9.5*LF, col:K.faint});
     }
   const H = St.hist;
   if (H.length > 1){
@@ -424,9 +431,9 @@ function ampPlot(){
     ctx.strokeStyle = K.pink; ctx.lineWidth = 1.1*FS; ctx.stroke();
     ctx.restore();
   }
-  txt("φ(t)", x, y - TT, {size:13*FS, w:600, col:K.mid});
-  txt("rad", x + w, y - TT, {size:11*FS, col:K.faint, al:"right"});
-  txt("time →", x + w, y + h + 10*FS, {size:10.5*FS, col:K.faint, al:"right"});
+  txt("φ(t)", x, y - TT, {size:13*LF, w:600, col:K.mid});
+  txt("rad", x + w, y - TT, {size:11*LF, col:K.faint, al:"right"});
+  txt("time →", x + w, y + h + 10*FS, {size:10.5*LF, col:K.faint, al:"right"});
 }
 
 /* ================= frame ================= */

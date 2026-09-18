@@ -56,6 +56,35 @@ Some things worth trying:
 URL presets are supported, e.g.
 [`#imb=0.14&eps=1.0&drive=0.3`](https://yoshi74ls181.github.io/mechanical-ats-linc/#imb=0.14&eps=1.0&drive=0.3).
 
+## Slide animations
+
+[`slide/`](slide/) holds two cut-down versions for dropping onto a talk. Each shows **one**
+element with the knobs locked and no controls, and of that only the pendulum, `U(φ)` and
+`φ(t)`, stacked vertically as a 2:3 portrait column — it sits at full slide height and
+leaves ~63% of a 16:9 slide for your text.
+
+| | pump `ε` | damping `ζ` | signal drive | rings up to |
+|---|---|---|---|---|
+| [`ats-slide.html`](slide/ats-slide.html) | 0.2 | 0.05 | 0 | `1.101 rad` over 60 mode-s |
+| [`linc-slide.html`](slide/linc-slide.html) | 0.2 | 0.02 | 0.2 | `1.370 rad`, still climbing at 108 |
+
+The contrast is the point of showing them together. The ATS rings up from **exact** rest
+with the drive off, because its coupling is odd and the pump enters as a force at the
+resonance. The LINC cannot: its pumped torque `−gC sin φ` vanishes at `φ = 0`, so a
+parity-protected rig can only be *amplified*, never started — hence the signal drive, which
+injects a seed for the pump to grow. And it grows slowly, a 33.7 s e-folding at this margin
+above threshold, so its clip is cut while the ring-up is still visibly climbing.
+
+```sh
+node slide/render.js                              # -> slide/out/ats-slide.mp4
+node slide/render.js --page slide/linc-slide.html  # -> slide/out/linc-slide.mp4
+```
+
+Renders through headless Chrome over the DevTools Protocol — no npm install — to 1080×1620
+H.264, 18 s, plus a GIF and a poster frame. Output is reproducible byte-for-byte and so is
+not committed; regenerate it. [`slide/README.md`](slide/README.md) has the details, the
+physics notes, and how to place the video on a slide.
+
 ## Credit
 
 The underlying pendulum analogy (junction → pendulum, SQUID → double pendulum at fixed
