@@ -328,12 +328,20 @@ function line(x1,y1,x2,y2,col,w,dash){
   if (dash) ctx.setLineDash(dash);
   ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.restore();
 }
-/* pink wedge between two arm directions, as on the slide */
-function wedge(cx,cy,r,thA,thB,fill,stroke){
+/* Pink sector between two arm directions, as on the slide.
+   ccw fixes the sweep DIRECTION, and both callers pass it, because the
+   fallback -- draw whichever of the two complementary sectors is smaller --
+   silently draws the wrong one as soon as the intended sector exceeds pi.
+   For the scissor sector that is not a corner case but the common case: it
+   spans 2*delta with delta = pi/2 + eps sin(w_p t), so 2*delta crosses pi
+   TWICE PER PUMP PERIOD, and the sector used to jump to the opposite
+   half-plane every time it did. */
+function wedge(cx,cy,r,thA,thB,fill,stroke,ccw){
   const [ax,ay] = dir(thA), [bx,by] = dir(thB);
   const a0 = Math.atan2(ay,ax), a1 = Math.atan2(by,bx);
   ctx.save(); ctx.beginPath(); ctx.moveTo(cx,cy);
-  ctx.arc(cx, cy, r, a0, a1, ((a1 - a0 + TAU) % TAU) > PI);
+  ctx.arc(cx, cy, r, a0, a1,
+          ccw === undefined ? ((a1 - a0 + TAU) % TAU) > PI : ccw);
   ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
   if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
   ctx.restore();
@@ -410,7 +418,11 @@ function rig(cx, cy, dev, a, C, S){
   sym("g", gx0 - 12, cy - 2, {size:18, col:K.faint, al:"center"});
 
   line(cx, cy - R - 20, cx, cy + R + 20, K.faint, 1.4, [5,6]);   // vertical reference
-  wedge(cx, cy, R*0.62, phi + a[0].th, phi + a[1].th, K.pinkF, "rgba(216,27,96,.35)");
+  // the scissor angle 2*delta, i.e. the pumped flux. Arms are at sigma +/- delta,
+  // so ccw = true is the sector BETWEEN them, bisected by the bias axis below,
+  // for any delta -- including delta > pi/2, which is half of every pump cycle.
+  wedge(cx, cy, R*0.62, phi + a[0].th, phi + a[1].th, K.pinkF,
+        "rgba(216,27,96,.35)", true);
 
   const [bx,by] = dir(phi + dev.sigma);                          // bias / scissor axis
   line(cx - bx*(R+16), cy - by*(R+16), cx + bx*(R+16), cy + by*(R+16),
@@ -435,7 +447,11 @@ function rig(cx, cy, dev, a, C, S){
   ctx.save(); ctx.fillStyle = K.ink;                             // pivot
   ctx.beginPath(); ctx.arc(cx, cy, 6.5, 0, TAU); ctx.fill(); ctx.restore();
 
-  wedge(cx, cy, 40, 0, phi, "rgba(120,120,120,.16)", null);      // the mode angle phi
+  // the mode angle phi: sweep from the vertical to phi, so ccw = phi < 0.
+  // Same as the old fallback while |phi| < pi, and still right past it -- a
+  // deep pump at low damping does push |phi| over pi, and there the fallback
+  // drew the 2*pi - |phi| complement instead.
+  wedge(cx, cy, 40, 0, phi, "rgba(120,120,120,.16)", null, phi < 0);
   sym("φ", cx + 27, cy + 62, {size:20, col:K.mid, al:"center"});
 
   /* centre of mass -- the faded green dot of the slide, exaggerated so the
