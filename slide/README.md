@@ -16,7 +16,7 @@ schematic, no Taylor-coefficient table, no control bar, no `m₁`/`m₂` labels.
 | pump-sector label | `π + φ_in` | `π + φ_pump` |
 | pump frequency | `1 × f` — resonant force | `2 × f` — degenerate parametric |
 | protected channel | `C ≡ 0` — Kerr-free | `S ≡ 0` — parity protected |
-| peak `φ` | 1.101 rad = **63.1°** | 1.370 rad = **78.5°** (cut mid-ring-up) |
+| peak `φ` | **1.101 rad** = 0.70 × π/2 | **1.370 rad** = 0.87 × π/2 (cut mid-ring-up) |
 | mode time per run | 60 s | **108 s** |
 | video length | 18 s | 18 s |
 
@@ -26,8 +26,9 @@ Both differ from the top-level animation in three ways, deliberately:
   px from the pivot, so the COM is exactly `(C, S)/Σm · R` px — no fudge factor, where
   `index.html` inflates it about 3× via `tanh(4.4·v/Σm)·R·0.78`. Peak excursion is
   `sin(ε) = 0.199` arm lengths.
-- **`φ(t)` is in degrees**, and has no envelope curve — the min/max band's own outline
-  reads as the envelope.
+- **`φ(t)` is in radians, ticked at `±π/4` and `±π/2`**, and has no envelope curve — the
+  min/max band's own outline reads as the envelope. Both pages use the identical range,
+  `1.3·(π/2)`, so the two plots can be read directly against each other.
 - **The pump sector is labelled** (`π + φ_in` / `π + φ_pump`), and the rotor angle is not labelled
   at all. The label sits on the sector's bisector, which is the bias axis, so it lands at
   the open end of the pink dashed line just past the arc at `0.62R`. The arms are at
@@ -67,7 +68,7 @@ rotor is Kerr-free *and* starts from exact rest. It rings up anyway, because the
 is **odd**: the pump enters as `c₁ = gS`, a force at the resonance. The pump rocks the
 centre of mass **across** gravity (the short pink stub at the hub), tilting the `U(φ)` well
 back and forth against the dashed pump-off parabola, and the rotor grows out of nothing to
-a cubic-damping-limited 63.1° over about 45 mode-seconds.
+a cubic-damping-limited 1.101 rad (0.70 × π/2) over about 45 mode-seconds.
 
 **LINC.** Balanced means `S ≡ 0` **exactly** — verified `0.0e+0`, not merely small — so the
 coupling is **even**: the pump moves `C` only, which modulates the spring constant instead
@@ -110,18 +111,17 @@ The `.gif` is the fallback if the deck has to survive being emailed around or op
 Google Slides: a GIF animates on its own with no playback settings to get wrong. The
 `.mp4` is much better quality — prefer it whenever PowerPoint is doing the playing.
 
-### Two things to know if you show them side by side
+### If you show them side by side
 
-- **The `φ(t)` y-axes differ**, because each is framed for its own amplitude: the ATS runs
-  to ±80°, the LINC to ±120°. Read across them and the LINC's swing looks smaller than it
-  is. Set both `yMax` to 120 (and both gridline lists to `[30, 60, 90]`) if you want the
-  two plots directly comparable.
+The `φ(t)` axes are now identical, so the traces are directly comparable — the LINC really
+does swing wider than the ATS. Two asymmetries remain:
+
 - **Both clips are 18 s, but mode time runs 1.8× faster in the LINC** — 108 s over 18 s
   versus the ATS's 60 s over 18 s — so its see-saw swings about 1/s against the ATS's 1 per
   1.8 s.
 - **The LINC clip stops mid-ring-up.** It is cut at 108 mode-seconds, and with a 33.7 s
   e-folding it does not saturate until ~130 s, so the trace is still visibly climbing at
-  the right edge and tops out near 78.5° rather than its ~90° plateau. That is the cost of
+  the right edge and tops out near 0.87 × π/2 rather than its ~π/2 plateau. That is the cost of
   an 18 s clip at a watchable swing rate: of `T_END`, `VID_S` and the on-screen swing rate,
   you can pick two. `T_END = 180, VID_S = 30` gets the full curve at this rate;
   `T_END = 180, VID_S = 18` gets the full curve in 18 s but plays 1.7× faster again.
