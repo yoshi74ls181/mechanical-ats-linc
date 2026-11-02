@@ -198,8 +198,7 @@ function ffmpeg(args, label){
     const png = path.join(OUTDIR, BASE + "-poster.png");
     const scale = "scale=" + meta.VW + ":" + meta.VH + ":flags=lanczos";
 
-    // H.264 / yuv420p in an MP4 -- what PowerPoint plays natively on both
-    // Windows and macOS. faststart so it starts without buffering the file.
+    // H.264 / yuv420p in an MP4 -- what PowerPoint plays natively on both Windows and macOS. faststart so it starts without buffering the file.
     console.log("encoding mp4 ...");
     ffmpeg(["-y", "-framerate", String(FPS), "-i", pat,
             "-vf", scale, "-c:v", "libx264", "-preset", "slow", "-crf", "18",
@@ -213,10 +212,8 @@ function ffmpeg(args, label){
     // animated GIF -- loops on its own in PowerPoint with no media controls
     console.log("encoding gif ...");
     const pal = path.join(FRAMEDIR, "pal.png");
-    // fps= in the filter graph, not -r: -r drops frames unevenly and judders.
-    // 12 fps at 720 tall keeps the 30 s LINC gif near 4 MB; at 15/960 it was
-    // 8.9 MB, too heavy to mail around, which is the only reason the gif
-    // exists. The mp4 is the one to actually put on a slide.
+    // fps= in the filter graph, not -r: -r drops frames unevenly and judders. 12 fps at 720 tall keeps the 30 s LINC gif near 4 MB; at 15/960 it was 8.9 MB, too heavy to mail around, which is the only reason the gif exists.
+    // The mp4 is the one to actually put on a slide.
     const gscale = "fps=12,scale=-2:720:flags=lanczos";
     ffmpeg(["-y", "-framerate", String(FPS), "-i", pat,
             "-vf", gscale + ",palettegen=max_colors=128:stats_mode=diff", pal], "palette");

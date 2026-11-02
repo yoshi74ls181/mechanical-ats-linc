@@ -1,16 +1,14 @@
-/* Does the scissor sector always contain the bias axis?
+/*
+ * Does the scissor sector always contain the bias axis?
  *
  *   node wedgetest.js <file.html> [port]
  *
- * The sector between the arms spans 2*delta and is bisected by the bias axis
- * dir(phi + sigma). So for ANY delta, two probe points either side of that
- * bisector must land on pink fill. If "draw the smaller sector" flips the
- * sector to the opposite half-plane when 2*delta > pi, the probes land on bare
- * paper instead, and that is the bug.
+ * The sector between the arms spans 2*delta and is bisected by the bias axis dir(phi + sigma).
+ * So for ANY delta, two probe points either side of that bisector must land on pink fill.
+ * If "draw the smaller sector" flips the sector to the opposite half-plane when 2*delta > pi, the probes land on bare paper instead, and that is the bug.
  *
- * Drives the real page: freezes its rAF loop, marches St.t across several
- * delta = pi/2 crossings, redraws, and reads the canvas back with
- * getImageData. No changes to the page under test.
+ * Drives the real page: freezes its rAF loop, marches St.t across several delta = pi/2 crossings, redraws, and reads the canvas back with getImageData.
+ * No changes to the page under test.
  */
 "use strict";
 const { spawn } = require("child_process");
@@ -78,10 +76,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   console.log("layout/state:", lay);
   if (JSON.parse(lay).narrow) { console.error("needs the WIDE layout"); process.exit(2); }
 
-  // Probe: +/-0.5 rad either side of the bias axis, at radius 45 -- inside the
-  // sector (52), outside the torsion spring (30) and the mode wedge (40), and
-  // off the bias axis itself so the exaggerated centre-of-mass marker (which
-  // for both devices runs ALONG that axis) cannot be mistaken for the fill.
+  // Probe: +/-0.5 rad either side of the bias axis, at radius 45 -- inside the sector (52), outside the torsion spring (30) and the mode wedge (40), and off the bias axis itself so the exaggerated centre-of-mass marker (which for both devices runs ALONG that axis) cannot be mistaken for the fill.
   const probe = `(function(tt){
     last = performance.now();
     St.t = tt;
